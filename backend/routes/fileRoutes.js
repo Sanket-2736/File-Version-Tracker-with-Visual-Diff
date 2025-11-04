@@ -4,11 +4,24 @@ import FileVersion from '../models/FileModel.js';
 
 const router = express.Router();
 
-// Configure multer for memory storage (text-based files only)
+// Utility function to format timestamps in your preferred timezone
+const formatTimestamp = (date) => {
+  return new Date(date).toLocaleString('en-US', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+    timeZone: 'Asia/Kolkata', // ✅ Change this to your local timezone if needed
+  });
+};
+
+// Configure multer for memory storage (text-based files)
 const storage = multer.memoryStorage();
 const upload = multer({
   storage,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
   fileFilter: (req, file, cb) => {
     const allowedTypes = [
       'text/plain',
@@ -22,6 +35,7 @@ const upload = multer({
       'text/x-c',
       'text/x-c++',
     ];
+
     if (
       allowedTypes.includes(file.mimetype) ||
       /\.(txt|js|jsx|ts|tsx|html|css|md|json|py|java|c|cpp|h|hpp)$/i.test(
@@ -35,7 +49,7 @@ const upload = multer({
   },
 });
 
-// ✅ POST /api/files/upload - Upload a new file or version
+// ✅ POST /api/files/upload - Upload new file or version
 router.post('/upload', upload.single('file'), async (req, res) => {
   try {
     if (!req.file) {
@@ -51,7 +65,7 @@ router.post('/upload', upload.single('file'), async (req, res) => {
       ? req.body.tags.split(',').map((t) => t.trim())
       : [];
 
-    // Find current highest version
+    // Get current highest version
     const existingVersions = await FileVersion.find({ filename }).sort({
       version: -1,
     });
@@ -79,7 +93,7 @@ router.post('/upload', upload.single('file'), async (req, res) => {
         filename: fileVersion.filename,
         version: fileVersion.version,
         size: fileVersion.size,
-        uploadedAt: fileVersion.createdAt, // ✅ current timestamp
+        uploadedAt: formatTimestamp(fileVersion.createdAt), // ✅ Local formatted timestamp
         uploader: fileVersion.uploader,
       },
     });
@@ -98,7 +112,7 @@ router.get('/', async (req, res) => {
         $group: {
           _id: '$filename',
           latestVersion: { $first: '$version' },
-          latestUploadedAt: { $first: '$createdAt' }, // ✅ use createdAt
+          latestCreatedAt: { $first: '$createdAt' },
           totalVersions: { $sum: 1 },
           latestUploader: { $first: '$uploader' },
           fileType: { $first: '$fileType' },
@@ -109,23 +123,29 @@ router.get('/', async (req, res) => {
           _id: 0,
           filename: '$_id',
           latestVersion: 1,
-          latestUploadedAt: 1,
+          latestCreatedAt: 1,
           totalVersions: 1,
           latestUploader: 1,
           fileType: 1,
         },
       },
-      { $sort: { latestUploadedAt: -1 } },
+      { $sort: { latestCreatedAt: -1 } },
     ]);
 
-    res.json(files);
+    // Format timestamps before sending
+    const formatted = files.map((f) => ({
+      ...f,
+      latestUploadedAt: formatTimestamp(f.latestCreatedAt),
+    }));
+
+    res.json(formatted);
   } catch (error) {
     console.error('Error fetching files:', error);
     res.status(500).json({ error: 'Failed to fetch files' });
   }
 });
 
-// ✅ GET /api/files/:filename - Get all versions of a file
+// ✅ GET /api/files/:filename - Get all versions of a specific file
 router.get('/:filename', async (req, res) => {
   try {
     const { filename } = req.params;
@@ -138,18 +158,14 @@ router.get('/:filename', async (req, res) => {
       return res.status(404).json({ error: 'File not found' });
     }
 
+    const formattedVersions = versions.map((v) => ({
+      ...v,
+      formattedDate: formatTimestamp(v.createdAt),
+    }));
+
     res.json({
       filename,
-      versions: versions.map((v) => ({
-        ...v,
-        formattedDate: new Date(v.createdAt).toLocaleString('en-US', {
-          year: 'numeric',
-          month: 'long',
-          day: 'numeric',
-          hour: '2-digit',
-          minute: '2-digit',
-        }),
-      })),
+      versions: formattedVersions,
     });
   } catch (error) {
     console.error('Error fetching file versions:', error);
@@ -157,16 +173,12 @@ router.get('/:filename', async (req, res) => {
   }
 });
 
-// ✅ GET /api/files/:filename/:version - Get a specific version
+// ✅ GET /api/files/:filename/:version - Get specific version content
 router.get('/:filename/:version', async (req, res) => {
   try {
     const { filename, version } = req.params;
     const fileVersion = await FileVersion.findOne({
       filename,
-});
-
-// ✅ GET /api/files/:filename/:version - Get a specific version
-router.get('/:filename/:version', async (req, res) => {
       version: parseInt(version),
     });
 
@@ -179,7 +191,7 @@ router.get('/:filename/:version', async (req, res) => {
       version: fileVersion.version,
       content: fileVersion.content,
       size: fileVersion.size,
-      uploadedAt: fileVersion.createdAt, // ✅ consistent timestamp
+      uploadedAt: formatTimestamp(fileVersion.createdAt), // ✅ Local timestamp
       uploader: fileVersion.uploader,
       fileType: fileVersion.fileType,
       tags: fileVersion.tags,
@@ -191,7 +203,7 @@ router.get('/:filename/:version', async (req, res) => {
   }
 });
 
-// ✅ DELETE /api/files/:filename/:version - Delete specific version
+// ✅ DELETE /api/files/:filename/:version - Delete a specific version
 router.delete('/:filename/:version', async (req, res) => {
   try {
     const { filename, version } = req.params;
