@@ -4,15 +4,12 @@ import FileVersion from '../models/FileModel.js';
 
 const router = express.Router();
 
-// Configure multer for memory storage (we'll handle text files)
+// Configure multer for memory storage (text-based files only)
 const storage = multer.memoryStorage();
 const upload = multer({
-  storage: storage,
-  limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB limit
-  },
+  storage,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
   fileFilter: (req, file, cb) => {
-    // Accept text files
     const allowedTypes = [
       'text/plain',
       'text/javascript',
@@ -25,9 +22,12 @@ const upload = multer({
       'text/x-c',
       'text/x-c++',
     ];
-    
-    if (allowedTypes.includes(file.mimetype) || 
-        /\.(txt|js|jsx|ts|tsx|html|css|md|json|py|java|c|cpp|h|hpp)$/i.test(file.originalname)) {
+    if (
+      allowedTypes.includes(file.mimetype) ||
+      /\.(txt|js|jsx|ts|tsx|html|css|md|json|py|java|c|cpp|h|hpp)$/i.test(
+        file.originalname
+      )
+    ) {
       cb(null, true);
     } else {
       cb(new Error('Only text-based files are allowed'), false);
@@ -35,7 +35,7 @@ const upload = multer({
   },
 });
 
-// POST /api/files/upload - Upload a new file or new version
+// ✅ POST /api/files/upload - Upload a new file or version
 router.post('/upload', upload.single('file'), async (req, res) => {
   try {
     if (!req.file) {
@@ -47,11 +47,16 @@ router.post('/upload', upload.single('file'), async (req, res) => {
     const fileSize = req.file.size;
     const uploader = req.body.uploader || 'Anonymous';
     const notes = req.body.notes || '';
-    const tags = req.body.tags ? req.body.tags.split(',').map(t => t.trim()) : [];
+    const tags = req.body.tags
+      ? req.body.tags.split(',').map((t) => t.trim())
+      : [];
 
-    // Get the current highest version for this filename
-    const existingVersions = await FileVersion.find({ filename }).sort({ version: -1 }).limit(1);
-    const nextVersion = existingVersions.length > 0 ? existingVersions[0].version + 1 : 1;
+    // Find current highest version
+    const existingVersions = await FileVersion.find({ filename }).sort({
+      version: -1,
+    });
+    const nextVersion =
+      existingVersions.length > 0 ? existingVersions[0].version + 1 : 1;
 
     // Create new version
     const fileVersion = new FileVersion({
@@ -74,7 +79,7 @@ router.post('/upload', upload.single('file'), async (req, res) => {
         filename: fileVersion.filename,
         version: fileVersion.version,
         size: fileVersion.size,
-        uploadedAt: fileVersion.uploadedAt,
+        uploadedAt: fileVersion.createdAt, // ✅ current timestamp
         uploader: fileVersion.uploader,
       },
     });
@@ -84,19 +89,16 @@ router.post('/upload', upload.single('file'), async (req, res) => {
   }
 });
 
-// GET /api/files - Get list of all unique files
+// ✅ GET /api/files - List all unique files with latest version
 router.get('/', async (req, res) => {
   try {
-    // Get distinct filenames with their latest version info
     const files = await FileVersion.aggregate([
-      {
-        $sort: { filename: 1, version: -1 },
-      },
+      { $sort: { filename: 1, version: -1 } },
       {
         $group: {
           _id: '$filename',
           latestVersion: { $first: '$version' },
-          latestUploadedAt: { $first: '$uploadedAt' },
+          latestUploadedAt: { $first: '$createdAt' }, // ✅ use createdAt
           totalVersions: { $sum: 1 },
           latestUploader: { $first: '$uploader' },
           fileType: { $first: '$fileType' },
@@ -113,9 +115,7 @@ router.get('/', async (req, res) => {
           fileType: 1,
         },
       },
-      {
-        $sort: { latestUploadedAt: -1 },
-      },
+      { $sort: { latestUploadedAt: -1 } },
     ]);
 
     res.json(files);
@@ -125,13 +125,13 @@ router.get('/', async (req, res) => {
   }
 });
 
-// GET /api/files/:filename - Get all versions of a specific file
+// ✅ GET /api/files/:filename - Get all versions of a file
 router.get('/:filename', async (req, res) => {
   try {
     const { filename } = req.params;
     const versions = await FileVersion.find({ filename })
       .sort({ version: 1 })
-      .select('version uploadedAt size uploader tags notes fileType')
+      .select('version createdAt size uploader tags notes fileType')
       .lean();
 
     if (versions.length === 0) {
@@ -140,9 +140,9 @@ router.get('/:filename', async (req, res) => {
 
     res.json({
       filename,
-      versions: versions.map(v => ({
+      versions: versions.map((v) => ({
         ...v,
-        formattedDate: new Date(v.uploadedAt).toLocaleDateString('en-US', {
+        formattedDate: new Date(v.createdAt).toLocaleString('en-US', {
           year: 'numeric',
           month: 'long',
           day: 'numeric',
@@ -157,11 +157,18 @@ router.get('/:filename', async (req, res) => {
   }
 });
 
-// GET /api/files/:filename/:version - Get specific version content
+// ✅ GET /api/files/:filename/:version - Get a specific version
 router.get('/:filename/:version', async (req, res) => {
   try {
     const { filename, version } = req.params;
-    const fileVersion = await FileVersion.findOne({ filename, version: parseInt(version) });
+    const fileVersion = await FileVersion.findOne({
+      filename,
+});
+
+// ✅ GET /api/files/:filename/:version - Get a specific version
+router.get('/:filename/:version', async (req, res) => {
+      version: parseInt(version),
+    });
 
     if (!fileVersion) {
       return res.status(404).json({ error: 'Version not found' });
@@ -172,7 +179,7 @@ router.get('/:filename/:version', async (req, res) => {
       version: fileVersion.version,
       content: fileVersion.content,
       size: fileVersion.size,
-      uploadedAt: fileVersion.uploadedAt,
+      uploadedAt: fileVersion.createdAt, // ✅ consistent timestamp
       uploader: fileVersion.uploader,
       fileType: fileVersion.fileType,
       tags: fileVersion.tags,
@@ -184,13 +191,13 @@ router.get('/:filename/:version', async (req, res) => {
   }
 });
 
-// DELETE /api/files/:filename/:version - Delete a specific version
+// ✅ DELETE /api/files/:filename/:version - Delete specific version
 router.delete('/:filename/:version', async (req, res) => {
   try {
     const { filename, version } = req.params;
-    const deleted = await FileVersion.findOneAndDelete({ 
-      filename, 
-      version: parseInt(version) 
+    const deleted = await FileVersion.findOneAndDelete({
+      filename,
+      version: parseInt(version),
     });
 
     if (!deleted) {
@@ -205,4 +212,3 @@ router.delete('/:filename/:version', async (req, res) => {
 });
 
 export default router;
-
