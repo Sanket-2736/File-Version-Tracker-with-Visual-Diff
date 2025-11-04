@@ -4,24 +4,11 @@ import FileVersion from '../models/FileModel.js';
 
 const router = express.Router();
 
-// Utility function to format timestamps in your preferred timezone
-const formatTimestamp = (date) => {
-  return new Date(date).toLocaleString('en-US', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: true,
-    timeZone: 'Asia/Kolkata', // ✅ Change this to your local timezone if needed
-  });
-};
-
-// Configure multer for memory storage (text-based files)
+// Configure multer
 const storage = multer.memoryStorage();
 const upload = multer({
   storage,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+  limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const allowedTypes = [
       'text/plain',
@@ -35,7 +22,6 @@ const upload = multer({
       'text/x-c',
       'text/x-c++',
     ];
-
     if (
       allowedTypes.includes(file.mimetype) ||
       /\.(txt|js|jsx|ts|tsx|html|css|md|json|py|java|c|cpp|h|hpp)$/i.test(
@@ -49,30 +35,21 @@ const upload = multer({
   },
 });
 
-// ✅ POST /api/files/upload - Upload new file or version
+// ✅ POST /api/files/upload
 router.post('/upload', upload.single('file'), async (req, res) => {
   try {
-    if (!req.file) {
-      return res.status(400).json({ error: 'No file uploaded' });
-    }
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
     const { filename } = req.body;
     const fileContent = req.file.buffer.toString('utf-8');
     const fileSize = req.file.size;
     const uploader = req.body.uploader || 'Anonymous';
     const notes = req.body.notes || '';
-    const tags = req.body.tags
-      ? req.body.tags.split(',').map((t) => t.trim())
-      : [];
+    const tags = req.body.tags ? req.body.tags.split(',').map(t => t.trim()) : [];
 
-    // Get current highest version
-    const existingVersions = await FileVersion.find({ filename }).sort({
-      version: -1,
-    });
-    const nextVersion =
-      existingVersions.length > 0 ? existingVersions[0].version + 1 : 1;
+    const existingVersions = await FileVersion.find({ filename }).sort({ version: -1 });
+    const nextVersion = existingVersions.length > 0 ? existingVersions[0].version + 1 : 1;
 
-    // Create new version
     const fileVersion = new FileVersion({
       filename: filename || req.file.originalname,
       version: nextVersion,
@@ -93,7 +70,7 @@ router.post('/upload', upload.single('file'), async (req, res) => {
         filename: fileVersion.filename,
         version: fileVersion.version,
         size: fileVersion.size,
-        uploadedAt: formatTimestamp(fileVersion.createdAt), // ✅ Local formatted timestamp
+        uploadedAt: fileVersion.createdAt, // UTC ISO timestamp
         uploader: fileVersion.uploader,
       },
     });
@@ -103,7 +80,7 @@ router.post('/upload', upload.single('file'), async (req, res) => {
   }
 });
 
-// ✅ GET /api/files - List all unique files with latest version
+// ✅ GET /api/files
 router.get('/', async (req, res) => {
   try {
     const files = await FileVersion.aggregate([
@@ -132,20 +109,14 @@ router.get('/', async (req, res) => {
       { $sort: { latestCreatedAt: -1 } },
     ]);
 
-    // Format timestamps before sending
-    const formatted = files.map((f) => ({
-      ...f,
-      latestUploadedAt: formatTimestamp(f.latestCreatedAt),
-    }));
-
-    res.json(formatted);
+    res.json(files); // Send raw UTC dates
   } catch (error) {
     console.error('Error fetching files:', error);
     res.status(500).json({ error: 'Failed to fetch files' });
   }
 });
 
-// ✅ GET /api/files/:filename - Get all versions of a specific file
+// ✅ GET /api/files/:filename
 router.get('/:filename', async (req, res) => {
   try {
     const { filename } = req.params;
@@ -154,18 +125,11 @@ router.get('/:filename', async (req, res) => {
       .select('version createdAt size uploader tags notes fileType')
       .lean();
 
-    if (versions.length === 0) {
-      return res.status(404).json({ error: 'File not found' });
-    }
-
-    const formattedVersions = versions.map((v) => ({
-      ...v,
-      formattedDate: formatTimestamp(v.createdAt),
-    }));
+    if (!versions.length) return res.status(404).json({ error: 'File not found' });
 
     res.json({
       filename,
-      versions: formattedVersions,
+      versions,
     });
   } catch (error) {
     console.error('Error fetching file versions:', error);
@@ -173,25 +137,20 @@ router.get('/:filename', async (req, res) => {
   }
 });
 
-// ✅ GET /api/files/:filename/:version - Get specific version content
+// ✅ GET /api/files/:filename/:version
 router.get('/:filename/:version', async (req, res) => {
   try {
     const { filename, version } = req.params;
-    const fileVersion = await FileVersion.findOne({
-      filename,
-      version: parseInt(version),
-    });
+    const fileVersion = await FileVersion.findOne({ filename, version: parseInt(version) });
 
-    if (!fileVersion) {
-      return res.status(404).json({ error: 'Version not found' });
-    }
+    if (!fileVersion) return res.status(404).json({ error: 'Version not found' });
 
     res.json({
       filename: fileVersion.filename,
       version: fileVersion.version,
       content: fileVersion.content,
       size: fileVersion.size,
-      uploadedAt: formatTimestamp(fileVersion.createdAt), // ✅ Local timestamp
+      uploadedAt: fileVersion.createdAt, // still UTC ISO
       uploader: fileVersion.uploader,
       fileType: fileVersion.fileType,
       tags: fileVersion.tags,
@@ -203,7 +162,7 @@ router.get('/:filename/:version', async (req, res) => {
   }
 });
 
-// ✅ DELETE /api/files/:filename/:version - Delete a specific version
+// ✅ DELETE /api/files/:filename/:version
 router.delete('/:filename/:version', async (req, res) => {
   try {
     const { filename, version } = req.params;
@@ -212,9 +171,7 @@ router.delete('/:filename/:version', async (req, res) => {
       version: parseInt(version),
     });
 
-    if (!deleted) {
-      return res.status(404).json({ error: 'Version not found' });
-    }
+    if (!deleted) return res.status(404).json({ error: 'Version not found' });
 
     res.json({ message: 'Version deleted successfully' });
   } catch (error) {
