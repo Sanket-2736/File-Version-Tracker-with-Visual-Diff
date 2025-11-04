@@ -22,10 +22,6 @@ const fileVersionSchema = new mongoose.Schema({
     type: String,
     default: 'Anonymous',
   },
-  uploadedAt: {
-    type: Date,
-    default: Date.now,
-  },
   fileType: {
     type: String,
     default: 'text/plain',
@@ -38,15 +34,14 @@ const fileVersionSchema = new mongoose.Schema({
     default: '',
   },
 }, {
-  timestamps: true,
+  timestamps: true, // creates createdAt & updatedAt automatically
 });
 
-// Compound index to ensure unique version per filename
 fileVersionSchema.index({ filename: 1, version: 1 }, { unique: true });
 
-// Virtual for formatted date
+// Optional: use createdAt for your formatted date
 fileVersionSchema.virtual('formattedDate').get(function() {
-  return this.uploadedAt.toLocaleDateString('en-US', {
+  return this.createdAt.toLocaleString('en-US', {
     year: 'numeric',
     month: 'long',
     day: 'numeric',
@@ -56,6 +51,4 @@ fileVersionSchema.virtual('formattedDate').get(function() {
 });
 
 const FileVersion = mongoose.model('FileVersion', fileVersionSchema);
-
 export default FileVersion;
-
